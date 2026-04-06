@@ -7,6 +7,7 @@
 #include <vector>
 #include <cmath>
 #include <set>
+#include <limits>
 #include <unistd.h>
 
 #include "simdjson.h"
@@ -35,6 +36,21 @@ namespace parser_load {
       TEST_SUCCEED();
     }
     TEST_FAIL("No documents returned");
+  }
+
+  bool parser_parse_huge_declared_length_capacity() {
+    TEST_START();
+    // Use a non-trivial string to avoid compiler object-size warnings with huge declared lengths.
+    // This test validates declared-length capacity handling, not source-buffer size.
+    std::string json = "0000000000000000000000000000000000000000000000000000000000000000";
+    size_t huge_size = SIMDJSON_MAXSIZE_BYTES;
+    if (huge_size == (std::numeric_limits<size_t>::max)()) {
+      TEST_SUCCEED();
+    }
+    huge_size += 1;
+    dom::parser parser{huge_size};
+    ASSERT_ERROR(parser.parse(json.c_str(), huge_size, true).error(), CAPACITY);
+    TEST_SUCCEED();
   }
 
   bool parser_parse_many_documents_error_in_the_middle() {
@@ -147,6 +163,7 @@ namespace parser_load {
     return true
         && parser_load_capacity()
         && parser_load_many_capacity()
+        && parser_parse_huge_declared_length_capacity()
         && parser_load_nonexistent()
         && parser_load_many_nonexistent()
         && padded_string_load_nonexistent()
