@@ -74,10 +74,21 @@ inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(s
 }
 
 inline simdjson_warn_unused error_code dom_parser_implementation::set_max_depth(size_t max_depth) noexcept {
+  // Keep depth-stack allocations safely below implementation-specific array-new limits.
+  static constexpr size_t max_depth_allocation_bytes = size_t(1) << 28; // 256 MiB
+  if (simdjson_unlikely(
+      max_depth > max_depth_allocation_bytes / sizeof(open_container) ||
+      max_depth > max_depth_allocation_bytes / sizeof(bool))) {
+    return CAPACITY;
+  }
+
+  std::unique_ptr<open_container[]> new_open_containers(new (std::nothrow) open_container[max_depth]);
+  std::unique_ptr<bool[]> new_is_array(new (std::nothrow) bool[max_depth]);
+  if (!new_is_array || !new_open_containers) { return MEMALLOC; }
+
   // Stage 2 stacks
-  open_containers.reset(new (std::nothrow) open_container[max_depth]);
-  is_array.reset(new (std::nothrow) bool[max_depth]);
-  if (!is_array || !open_containers) { _max_depth = 0; return MEMALLOC; }
+  open_containers.swap(new_open_containers);
+  is_array.swap(new_is_array);
 
   _max_depth = max_depth;
   return SUCCESS;

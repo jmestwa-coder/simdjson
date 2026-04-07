@@ -25,19 +25,32 @@ simdjson_warn_unused simdjson_inline error_code parser::allocate(size_t new_capa
   if (new_capacity > max_capacity()) { return CAPACITY; }
   if (string_buf && new_capacity == capacity() && new_max_depth == max_depth()) { return SUCCESS; }
 
-  // string_capacity copied from document::allocate
-  _capacity = 0;
-  size_t string_capacity = SIMDJSON_ROUNDUP_N(5 * new_capacity / 3 + SIMDJSON_PADDING, 64);
-  string_buf.reset(new (std::nothrow) uint8_t[string_capacity]);
 #if SIMDJSON_DEVELOPMENT_CHECKS
-  start_positions.reset(new (std::nothrow) token_position[new_max_depth]);
+  static constexpr size_t max_depth_allocation_bytes = size_t(1) << 28; // 256 MiB
+  if (simdjson_unlikely(new_max_depth > max_depth_allocation_bytes / sizeof(token_position))) {
+    return CAPACITY;
+  }
+#endif
+
+  // string_capacity copied from document::allocate
+  size_t string_capacity = SIMDJSON_ROUNDUP_N(5 * new_capacity / 3 + SIMDJSON_PADDING, 64);
+  std::unique_ptr<uint8_t[]> new_string_buf(new (std::nothrow) uint8_t[string_capacity]);
+  if (!new_string_buf) { return MEMALLOC; }
+#if SIMDJSON_DEVELOPMENT_CHECKS
+  std::unique_ptr<token_position[]> new_start_positions(new (std::nothrow) token_position[new_max_depth]);
+  if (!new_start_positions) { return MEMALLOC; }
 #endif
   if (implementation) {
-    SIMDJSON_TRY( implementation->set_capacity(new_capacity) );
     SIMDJSON_TRY( implementation->set_max_depth(new_max_depth) );
+    SIMDJSON_TRY( implementation->set_capacity(new_capacity) );
   } else {
     SIMDJSON_TRY( simdjson::get_active_implementation()->create_dom_parser_implementation(new_capacity, new_max_depth, implementation) );
   }
+
+  string_buf.swap(new_string_buf);
+#if SIMDJSON_DEVELOPMENT_CHECKS
+  start_positions.swap(new_start_positions);
+#endif
   _capacity = new_capacity;
   _max_depth = new_max_depth;
   return SUCCESS;
